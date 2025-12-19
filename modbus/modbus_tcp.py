@@ -12,14 +12,13 @@ class TcpMaster:
     """
     ModBus TCP 主站
     """
-    def __init__(self, host='127.0.0.1', port=502, timeout_in_sec=5.0):
+    def __init__(self, host='0.0.0.0', port=502, timeout_in_sec=5.0):
         """
         初始化 TCP Master
-        
         Args:
             host: 服务器地址
             port: 服务器端口，默认 502
-            timeout_in_sec: 超时时间(秒)
+            timeout_in_sec: 超时时间
         """
         self._host = host
         self._port = port
@@ -95,10 +94,8 @@ class TcpMaster:
         for attempt in range(retry_count):
             try:
                 self.open()
-                
                 # 发送请求
                 self._sock.sendall(request)
-                
                 # 接收MBAP头(7字节)
                 header = b''
                 while len(header) < 7:
@@ -106,11 +103,9 @@ class TcpMaster:
                     if not chunk:
                         raise Exception("连接已关闭")
                     header += chunk
-                
                 # 解析长度字段
                 length = struct.unpack('>H', header[4:6])[0]
-                
-                # 接收剩余数据 (length - 1字节，因为unit_id已在header中)
+                # 接收剩余数据length-1字节，因为unit_id已在header中
                 remaining = length - 1
                 data = header
                 while remaining > 0:
@@ -134,25 +129,20 @@ class TcpMaster:
                 self.close()
                 if attempt < retry_count - 1:
                     time.sleep(0.5)
-        
         raise Exception(f"通信失败，已重试{retry_count}次: {last_error}")
     
     def execute(self, slave, function_code, starting_address, quantity_of_x=0, 
                 output_value=0, data_format='', expected_length=-1):
         """
         执行 ModBus 命令(与 modbus-tk 兼容的接口)
-        
         Args:
             slave: 从站地址
             function_code: 功能码
             starting_address: 起始地址
             quantity_of_x: 读取数量
-            output_value: 写入值(单个值或列表)
-            data_format: 数据格式(暂不支持)
-            expected_length: 期望长度(暂不使用)
-            
+            output_value: 写入值
         Returns:
-            读操作返回数据元组，写操作返回(地址, 数量)元组
+            读操作返回数据，写操作返回
         """
         try:
             transaction_id = self._get_transaction_id()
@@ -326,14 +316,11 @@ class TcpMaster:
 
 class Databank:
     """
-    数据存储区(与 modbus-tk 兼容)
-    存储线圈、离散输入、输入寄存器、保持寄存器
+    数据存储区
     """
-    
     def __init__(self, block_type, starting_address, size):
         """
         初始化数据块
-        
         Args:
             block_type: 数据类型(COILS, DISCRETE_INPUTS, INPUT_REGISTERS, HOLDING_REGISTERS)
             starting_address: 起始地址
@@ -465,7 +452,6 @@ class Slave:
 class TcpServer:
     """
     ModBus TCP 服务器(从站)
-    用法与 modbus-tk 的 TcpServer 相同
     """
     
     def __init__(self, port=502, address=''):
@@ -621,7 +607,6 @@ class TcpServer:
         frame = ModbusTCPFrame.parse_frame(request)
         if not frame:
             return None
-        
         # 查找从站
         slave = self._slaves.get(frame.unit_id)
         if not slave:
@@ -629,7 +614,7 @@ class TcpServer:
                 frame.transaction_id, frame.unit_id, frame.function_code, defines.SLAVE_DEVICE_FAILURE
             )
         
-        # 根据功能码处理
+        #根据功能码处理
         try:
             if frame.function_code == defines.READ_COILS:
                 return self._handle_read_coils(frame, slave)
@@ -677,8 +662,7 @@ class TcpServer:
         
         start_addr, quantity = struct.unpack('>HH', frame.data[:4])
         values = slave._get_values_by_type(defines.DISCRETE_INPUTS, start_addr, quantity)
-        
-        # 构建响应
+        #响应
         byte_count = (quantity + 7) // 8
         input_bytes = bytearray(byte_count)
         for i, status in enumerate(values):
@@ -733,7 +717,6 @@ class TcpServer:
         
         value = (coil_value == 0xFF00)
         slave._set_values_by_type(defines.COILS, address, [value])
-        
         return ModbusTCPFrame.build_write_single_coil_response(frame.transaction_id, frame.unit_id, address, value)
     
     def _handle_write_single_register(self, frame: ModbusTCPFrame, slave: Slave) -> bytes:
@@ -742,10 +725,8 @@ class TcpServer:
             return ModbusTCPFrame.build_error_response(
                 frame.transaction_id, frame.unit_id, frame.function_code, defines.ILLEGAL_DATA_VALUE
             )
-        
         address, value = struct.unpack('>HH', frame.data[:4])
         slave._set_values_by_type(defines.HOLDING_REGISTERS, address, [value])
-        
         # 回显响应
         data = struct.pack('>HH', address, value)
         return ModbusTCPFrame.build_request(frame.transaction_id, frame.unit_id, frame.function_code, data)
@@ -756,10 +737,8 @@ class TcpServer:
             return ModbusTCPFrame.build_error_response(
                 frame.transaction_id, frame.unit_id, frame.function_code, defines.ILLEGAL_DATA_VALUE
             )
-        
         start_addr, quantity, byte_count = struct.unpack('>HHB', frame.data[:5])
         coil_bytes = frame.data[5:5+byte_count]
-        
         # 解析线圈值
         values = []
         for byte in coil_bytes:
@@ -768,8 +747,6 @@ class TcpServer:
                     values.append(bool((byte >> bit) & 1))
         
         slave._set_values_by_type(defines.COILS, start_addr, values)
-        
-        # 响应
         data = struct.pack('>HH', start_addr, quantity)
         return ModbusTCPFrame.build_request(frame.transaction_id, frame.unit_id, frame.function_code, data)
     
@@ -779,18 +756,12 @@ class TcpServer:
             return ModbusTCPFrame.build_error_response(
                 frame.transaction_id, frame.unit_id, frame.function_code, defines.ILLEGAL_DATA_VALUE
             )
-        
         start_addr, quantity, byte_count = struct.unpack('>HHB', frame.data[:5])
         register_data = frame.data[5:5+byte_count]
-        
-        # 解析寄存器值
         values = []
         for i in range(0, byte_count, 2):
             value = struct.unpack('>H', register_data[i:i+2])[0]
             values.append(value)
-        
         slave._set_values_by_type(defines.HOLDING_REGISTERS, start_addr, values)
-        
-        # 响应
         data = struct.pack('>HH', start_addr, quantity)
         return ModbusTCPFrame.build_request(frame.transaction_id, frame.unit_id, frame.function_code, data)

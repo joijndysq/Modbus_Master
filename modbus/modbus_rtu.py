@@ -5,26 +5,21 @@ import serial
 import struct
 import time
 import threading
-from typing import Optional, List
+from typing import Optional
 from . import defines
 from .modbus_frame import ModbusCRC
 
-
 class RtuMaster:
     """
-    ModBus RTU 主站(客户端)
-    用法与 modbus-tk 的 RtuMaster 相同
-    """
-    
+    ModBus RTU 主站
+    """ 
     def __init__(self, serial_port):
         """
         初始化 RTU Master
-        
         Args:
-            serial_port: pyserial.Serial 对象
+            serial_port: pyserial.Serial
         """
         if isinstance(serial_port, str):
-            # 如果传入的是串口名称，自动创建 Serial 对象
             self._serial = serial.Serial(
                 port=serial_port,
                 baudrate=9600,
@@ -35,11 +30,9 @@ class RtuMaster:
             )
         else:
             self._serial = serial_port
-        
         self._is_opened = self._serial.is_open
         self._timeout = self._serial.timeout if self._serial.timeout else 1.0
-        
-        # RTU 时间参数(基于波特率计算)
+        #RTU时间参数
         self._t0 = self._calculate_t0(self._serial.baudrate)
     
     def _calculate_t0(self, baudrate):
@@ -73,30 +66,27 @@ class RtuMaster:
         self.close()
     
     def _build_request(self, slave, function_code, data):
-        """构建 RTU 请求帧"""
-        # RTU 帧 = 从站地址 + 功能码 + 数据 + CRC
+        """构建RTU请求帧"""
+        #RTU帧=从站地址+功能码+数据+CRC
         frame = struct.pack('BB', slave, function_code) + data
         crc = ModbusCRC.calculate_crc(frame)
-        return frame + struct.pack('<H', crc)  # 注意：CRC 是小端序
+        return frame + struct.pack('<H', crc) 
     
     def _parse_response(self, response, slave):
-        """解析 RTU 响应帧"""
-        if len(response) < 5:  # 至少：地址(1) + 功能码(1) + 数据(1) + CRC(2)
+        """解析RTU响应帧"""
+        if len(response) < 5:  #地址(1)+功能码(1)+数据(1)+CRC(2)
             return None
-        
-        # 检查从站地址
+        #检查从站地址
         resp_slave = response[0]
         if resp_slave != slave:
             return None
-        
-        # 检查 CRC
+        #检查CRC
         crc_received = struct.unpack('<H', response[-2:])[0]
         crc_calculated = ModbusCRC.calculate_crc(response[:-2])
         if crc_received != crc_calculated:
             print(f"CRC error: received={crc_received:04X}, calculated={crc_calculated:04X}")
             return None
-        
-        # 返回功能码和数据
+        #返回功能码和数据
         function_code = response[1]
         data = response[2:-2]
         return function_code, data
@@ -105,18 +95,14 @@ class RtuMaster:
         """发送请求并接收响应"""
         try:
             self.open()
-            
-            # 清空缓冲区
+            #清空缓冲区
             self._serial.reset_input_buffer()
             self._serial.reset_output_buffer()
-            
-            # 发送请求
+            #发送请求
             self._serial.write(request)
-            
-            # 等待帧间延迟
+            #等待帧间延迟
             time.sleep(3.5 * self._t0)
-            
-            # 接收响应
+            #接收响应
             response = b''
             start_time = time.time()
             
@@ -124,13 +110,12 @@ class RtuMaster:
                 if self._serial.in_waiting > 0:
                     chunk = self._serial.read(self._serial.in_waiting)
                     response += chunk
-                    
-                    # 检查是否接收完整
-                    if len(response) >= 5:  # 最小帧长度
-                        # 等待字符间超时
+                    #检查是否接收完整
+                    if len(response) >= 5: 
+                        #等待字符间超时
                         time.sleep(1.5 * self._t0)
                         if self._serial.in_waiting == 0:
-                            # 没有更多数据，认为帧接收完毕
+                            #没有更多数据，认为帧接收完毕
                             break
                 else:
                     time.sleep(0.001)
@@ -144,21 +129,17 @@ class RtuMaster:
     def execute(self, slave, function_code, starting_address, quantity_of_x=0,
                 output_value=0, data_format='', expected_length=-1):
         """
-        执行 ModBus 命令(与 modbus-tk 兼容的接口)
-        
+        执行 ModBus 命令
         Args:
             slave: 从站地址(1-247)
             function_code: 功能码
             starting_address: 起始地址
             quantity_of_x: 读取数量
-            output_value: 写入值(单个值或列表)
-            data_format: 数据格式(暂不支持)
-            expected_length: 期望长度(暂不使用)
-            
+            output_value: 写入值(单个值或列表) 
         Returns:
             读操作返回数据元组，写操作返回(地址, 数量)元组
         """
-        # 读线圈
+        #读线圈
         if function_code == defines.READ_COILS:
             data = struct.pack('>HH', starting_address, quantity_of_x)
             request = self._build_request(slave, function_code, data)
@@ -181,7 +162,7 @@ class RtuMaster:
                                 coils.append(bool((byte >> bit) & 1))
                         return tuple(coils[:quantity_of_x])
         
-        # 读保持寄存器
+        #读保持寄存器
         elif function_code == defines.READ_HOLDING_REGISTERS:
             data = struct.pack('>HH', starting_address, quantity_of_x)
             request = self._build_request(slave, function_code, data)
@@ -204,7 +185,7 @@ class RtuMaster:
                             registers.append(value)
                         return tuple(registers[:quantity_of_x])
         
-        # 读输入寄存器
+        #读输入寄存器
         elif function_code == defines.READ_INPUT_REGISTERS:
             data = struct.pack('>HH', starting_address, quantity_of_x)
             request = self._build_request(slave, function_code, data)
@@ -226,7 +207,7 @@ class RtuMaster:
                             registers.append(value)
                         return tuple(registers[:quantity_of_x])
         
-        # 读离散输入
+        #读离散输入
         elif function_code == defines.READ_DISCRETE_INPUTS:
             data = struct.pack('>HH', starting_address, quantity_of_x)
             request = self._build_request(slave, function_code, data)
@@ -248,7 +229,7 @@ class RtuMaster:
                                 inputs.append(bool((byte >> bit) & 1))
                         return tuple(inputs[:quantity_of_x])
         
-        # 写单个线圈
+        #写单个线圈
         elif function_code == defines.WRITE_SINGLE_COIL:
             value = 0xFF00 if output_value else 0x0000
             data = struct.pack('>HH', starting_address, value)
@@ -266,7 +247,7 @@ class RtuMaster:
                         addr, val = struct.unpack('>HH', resp_data[:4])
                         return (addr, val)
         
-        # 写单个寄存器
+        #写单个寄存器
         elif function_code == defines.WRITE_SINGLE_REGISTER:
             data = struct.pack('>HH', starting_address, output_value & 0xFFFF)
             request = self._build_request(slave, function_code, data)
@@ -283,7 +264,7 @@ class RtuMaster:
                         addr, val = struct.unpack('>HH', resp_data[:4])
                         return (addr, val)
         
-        # 写多个线圈
+        #写多个线圈
         elif function_code == defines.WRITE_MULTIPLE_COILS:
             if not isinstance(output_value, (list, tuple)):
                 output_value = [output_value]
@@ -311,7 +292,7 @@ class RtuMaster:
                         addr, qty = struct.unpack('>HH', resp_data[:4])
                         return (addr, qty)
         
-        # 写多个寄存器
+        #写多个寄存器
         elif function_code == defines.WRITE_MULTIPLE_REGISTERS:
             if not isinstance(output_value, (list, tuple)):
                 output_value = [output_value]
@@ -341,16 +322,13 @@ class RtuMaster:
 class RtuServer:
     """
     ModBus RTU 服务器(从站)
-    用法与 modbus-tk 的 RtuServer 相同
     """
-    
     def __init__(self, serial_port, slave_id=1):
         """
         初始化 RTU Server
-        
         Args:
-            serial_port: pyserial.Serial 对象或串口名称
-            slave_id: 默认从站地址
+            serial_port:Serial对象
+            slave_id:默认从站地址
         """
         if isinstance(serial_port, str):
             self._serial = serial.Serial(
@@ -367,8 +345,7 @@ class RtuServer:
         self._is_running = False
         self._slaves = {}
         self._server_thread = None
-        
-        # RTU 时间参数
+        #RTU
         self._t0 = self._calculate_t0(self._serial.baudrate)
         
         # 添加默认从站
@@ -385,7 +362,7 @@ class RtuServer:
     def add_slave(self, slave_id):
         """添加从站"""
         try:
-            from .modbus_tcp import Slave  # 复用 TCP 的 Slave 类
+            from .modbus_tcp import Slave  #复用TCP的Slave 类
         except ImportError:
             from modbus_tcp import Slave
         slave = Slave(slave_id)
@@ -438,7 +415,7 @@ class RtuServer:
                 else:
                     # 检查帧间延迟
                     if buffer and (time.time() - last_byte_time) > 3.5 * self._t0:
-                        # 一帧接收完毕，处理请求
+                        #一帧接收完毕，处理请求
                         response = self._process_request(buffer)
                         if response:
                             # 发送响应前等待
@@ -455,7 +432,7 @@ class RtuServer:
     
     def _process_request(self, request: bytes) -> Optional[bytes]:
         """处理 RTU 请求"""
-        if len(request) < 5:  # 最小帧：地址(1) + 功能码(1) + 数据(1) + CRC(2)
+        if len(request) < 5:  #地址(1) + 功能码(1) + 数据(1) + CRC(2)
             return None
         
         # 解析帧
@@ -468,14 +445,11 @@ class RtuServer:
         crc_calculated = ModbusCRC.calculate_crc(request[:-2])
         if crc_received != crc_calculated:
             return None
-        
         # 查找从站
         slave = self._slaves.get(slave_addr)
         if not slave:
-            # 广播地址(0)也忽略
             return None
-        
-        # 处理请求
+        #处理请求
         try:
             response_data = None
             
@@ -571,21 +545,19 @@ class RtuServer:
                     response_data = struct.pack('>HH', start_addr, quantity)
             
             else:
-                # 不支持的功能码
                 response_data = struct.pack('B', defines.ILLEGAL_FUNCTION)
                 function_code |= 0x80
             
             if response_data:
-                # 构建响应帧
+                #构建响应帧
                 frame = struct.pack('BB', slave_addr, function_code) + response_data
                 crc = ModbusCRC.calculate_crc(frame)
                 return frame + struct.pack('<H', crc)
         
         except Exception as e:
             print(f"Error processing request: {e}")
-            # 返回异常响应
+            #返回异常响应
             frame = struct.pack('BBB', slave_addr, function_code | 0x80, defines.SLAVE_DEVICE_FAILURE)
             crc = ModbusCRC.calculate_crc(frame)
             return frame + struct.pack('<H', crc)
-        
         return None
